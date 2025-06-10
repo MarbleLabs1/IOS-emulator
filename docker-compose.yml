@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  silicon-emulator:
+    build: .
+    container_name: silicon-emulator
+    privileged: true
+    ports:
+      - "3001:3001"    # Backend API
+      - "80:80"        # Frontend
+      - "5900-5910:5900-5910"  # VNC ports
+      - "6080:6080"    # noVNC web interface
+    volumes:
+      - ./data/vms:/app/vms
+      - ./data/disk-images:/app/disk-images
+      - ./data/logs:/app/logs
+      - /dev/kvm:/dev/kvm  # KVM device for hardware acceleration
+    devices:
+      - /dev/kvm:/dev/kvm
+    environment:
+      - NODE_ENV=production
+      - FRONTEND_URL=http://localhost
+      - VNC_PASSWORD=silicon123
+      - QEMU_AUDIO_DRV=none
+    restart: unless-stopped
+    networks:
+      - silicon-network
+
+  # Optional: Separate database for advanced features
+  # postgres:
+  #   image: postgres:15
+  #   container_name: silicon-db
+  #   environment:
+  #     POSTGRES_DB: silicon_emulator
+  #     POSTGRES_USER: silicon
+  #     POSTGRES_PASSWORD: silicon_password
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   networks:
+  #     - silicon-network
+
+networks:
+  silicon-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+
+# For Windows users (without KVM)
+---
+version: '3.8'
+
+services:
+  silicon-emulator-windows:
+    build: 
+      context: .
+      dockerfile: docker/windows.dockerfile
+    container_name: silicon-emulator-windows
+    ports:
+      - "3001:3001"
+      - "80:80"
+      - "5900-5910:5900-5910"
+      - "6080:6080"
+    volumes:
+      - ./data/vms:/app/vms
+      - ./data/disk-images:/app/disk-images
+      - ./data/logs:/app/logs
+    environment:
+      - NODE_ENV=production
+      - FRONTEND_URL=http://localhost
+      - VNC_PASSWORD=silicon123
+      - QEMU_AUDIO_DRV=none
+      - QEMU_ACCEL=tcg  # Use TCG instead of KVM on Windows
+    restart: unless-stopped
+
