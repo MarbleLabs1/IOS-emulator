@@ -1,8 +1,40 @@
-# QEMU Emulator Manager
+<div align="center">
 
-A small web dashboard and HTTP API for running and monitoring **ARM64 (AArch64) virtual machines with QEMU**. Start and stop VMs, stream their console logs, and reach them over VNC or SSH.
+# 🖥️ QEMU Emulator Manager
 
-> **What this is not:** it does not run iOS or iOS apps. iOS needs Apple's proprietary, signed boot chain and hardware, which QEMU cannot provide. This project boots ARM64 Linux (and any other UEFI-bootable ARM64 OS).
+**Run, watch and control ARM64 virtual machines from your browser.**
+
+[![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go&logoColor=white)](linux-emulator-server)
+[![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](src)
+[![QEMU](https://img.shields.io/badge/QEMU-aarch64-FF6600?logo=qemu&logoColor=white)](https://www.qemu.org)
+[![License](https://img.shields.io/badge/license-MIT-green)](linux-emulator-server/LICENSE)
+
+[Quick start](#quick-start) · [Docker](#docker) · [Security](#security) · [API](#api) · [Configuration](#configuration)
+
+</div>
+
+---
+
+## ✨ Features
+
+- ▶️ **Start / stop VMs** from a dashboard or the HTTP API
+- 📜 **Live console logs** streamed over WebSocket
+- 🖧 **VNC and SSH** access, bound to `127.0.0.1` by default
+- 🔐 **Token-protected API**, loopback-only unless you opt in
+- 🐳 **Docker, systemd and Kubernetes** files included
+- 🧪 **Tested Go backend** (race detector, path-escape and auth tests)
+
+## 🧭 How it works
+
+```
+ Browser ──HTTP/WS──▶  Go manager (:8080)  ──spawns──▶  enhanced-run.sh ──▶ qemu-system-aarch64
+ (React UI)            auth · API · logs                 one script per VM     ARM64 Linux guest
+                                                                               │
+                                              VNC 127.0.0.1:590N ◀─────────────┤
+                                              SSH 127.0.0.1:2222 ◀─────────────┘
+```
+
+> ⚠️ **Not an iOS emulator.** iOS needs Apple's proprietary, signed boot chain and hardware, which QEMU cannot provide. This project boots ARM64 Linux (and any other UEFI-bootable ARM64 OS).
 
 ## Quick start
 
