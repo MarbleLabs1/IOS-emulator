@@ -1,56 +1,31 @@
-# QEMU iOS Emulator — Enhanced Setup
+# Emulator notes
 
-This document describes the enhanced setup, run scripts, manager API, Docker and Kubernetes manifests added to the repository.
+## What runs
 
-Quick start (dev container / Ubuntu):
+`enhanced-run.sh` starts a QEMU `virt` machine (AArch64) with UEFI firmware, a virtio disk, virtio networking, and optionally VNC with a virtio GPU and USB keyboard/tablet. It is meant for ARM64 Linux guests. iOS is not supported.
 
-1. Run the advanced setup (installs dependencies and prepares edk2):
+## Profiles
 
-```bash
-sudo bash linux-emulator-server/src/scripts/advanced-setup.sh
-```
+| Profile | CPU | When to use |
+| --- | --- | --- |
+| `default` | `cortex-a72` (or `host` with KVM) | Works everywhere |
+| `max` | `max` (or `host` with KVM) | Every CPU feature QEMU can emulate |
 
-2. Build manager binary (from repo root):
+## Networking
 
-```bash
-cd linux-emulator-server
-go build -o cmd/manager/manager ./cmd/manager
-```
+User-mode NAT. Guest port 22 is forwarded to `--ssh-port` (default 2222) on `127.0.0.1`. Use a different `--ssh-port` per VM.
 
-3. Start manager locally:
+## Snapshots
 
 ```bash
-./cmd/manager/manager
+enhanced-run.sh --name demo --snapshot save --snapshot-name clean
+enhanced-run.sh --name demo --snapshot load --snapshot-name clean
 ```
 
-4. Start a VM via API:
+Stop the VM before saving or loading a snapshot.
 
-```bash
-curl -X POST -H "Content-Type: application/json" -d '{"name":"testvm","args":["--profile","iphone14"]}' http://localhost:8080/api/v1/vm/start
-```
+## Troubleshooting
 
-5. Stream logs with WebSocket (example in JavaScript):
-
-```js
-const ws = new WebSocket('ws://localhost:8080/api/v1/ws/logs?name=testvm');
-ws.onmessage = e => console.log(e.data);
-```
-
-Docker:
-
-```bash
-docker compose -f docker-compose.qemu.yml up --build
-```
-
-Kubernetes:
-
-```bash
-kubectl apply -f infra/k8s/deployment.yaml
-kubectl apply -f infra/k8s/service.yaml
-kubectl apply -f infra/k8s/hpa.yaml
-```
-
-Notes & security:
-- Logs and VM images are stored under `/var/log/qemu-ios-emulator` and `/var/lib/qemu-ios-emulator` by default — ensure proper permissions and backups.
-- The manager runs system commands and spawns QEMU processes; run it with limited privileges or in containers.
-- For production, use non-root users, secure websockets, and put the manager behind an authenticated API gateway.
+- `AArch64 UEFI firmware not found`: run `make vm-setup` or set `FIRMWARE=/path/to/QEMU_EFI.fd`.
+- Very slow guest: you are on a non-ARM host, so QEMU emulates the CPU. Use fewer CPUs and a lightweight distro.
+- VM exits right after starting: the API returns the reason, and the full output is in `/var/log/qemu-ios-emulator/<name>.log`.

@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  backend:
+    name: Go tests
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: linux-emulator-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: linux-emulator-server/go.sum
+      - run: go mod verify
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+
+  frontend:
+    name: Web UI
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+
+  vm-smoke:
+    name: Boot a real ARM64 VM
+    runs-on: ubuntu-24.04
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: linux-emulator-server/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install QEMU and UEFI firmware
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-arm qemu-utils qemu-efi-aarch64
+          qemu-system-aarch64 --version | head -1
+
+      - name: Build UI and manager
+        run: |
+          npm ci && npm run build
+          (cd linux-emulator-server && go build -o "$GITHUB_WORKSPACE/bin/manager" ./cmd/manager)
+
+      - name: Start the manager
+        run: |
+          mkdir -p "$RUNNER_TEMP/logs" "$RUNNER_TEMP/vms"
+          EMULATOR_RUNNER="$PWD/linux-emulator-server/src/scripts/enhanced-run.sh" \
+          MANAGER_STATIC_DIR="$PWD/dist" \
+          EMULATOR_LOG_DIR="$RUNNER_TEMP/logs" \
+          VM_DIR="$RUNNER_TEMP/vms" \
+          MANAGER_ADDR=127.0.0.1:8080 \
+          nohup ./bin/manager > "$RUNNER_TEMP/manager.log" 2>&1 &
+          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8080/healthz && break; sleep 1; done
+
+      - name: Dashboard is served
+        run: curl -fsS http://127.0.0.1:8080/ | grep -q 'id="root"'
+
+      - name: Start a VM through the API
+        run: |
+          curl -fsS -X POST -d '{"name":"ci","memory":"1G","cpus":2,"headless":true}' \
+            http://127.0.0.1:8080/api/v1/vm/start
+          curl -fsS http://127.0.0.1:8080/api/v1/vm/list | tee /dev/stderr | grep -q '"ci"'
+
+      - name: Wait for the UEFI firmware banner in the VM log
+        run: |
+          for i in $(seq 1 90); do
+            if grep -qiE 'UEFI firmware|BdsDxe|EFI stub|Shell>' "$RUNNER_TEMP/logs/ci.log"; then
+              echo "UEFI firmware booted after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "No UEFI output within 90s" >&2
+          exit 1
+
+      - name: Stop the VM through the API
+        run: |
+          curl -fsS -X POST -d '{"name":"ci"}' http://127.0.0.1:8080/api/v1/vm/stop
+          test "$(curl -fsS http://127.0.0.1:8080/api/v1/vm/list)" = "[]"
+          ! pgrep -f qemu-system-aarch64
+
+      - name: Show logs
+        if: always()
+        run: |
+          echo "--- VM log"; tail -n 60 "$RUNNER_TEMP/logs/ci.log" || true
+          echo "--- manager log"; cat "$RUNNER_TEMP/manager.log" || true
