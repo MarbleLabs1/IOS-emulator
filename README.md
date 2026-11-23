@@ -4,6 +4,7 @@
 
 **Run, watch and control ARM64 virtual machines from your browser.**
 
+[![CI](https://github.com/MarbleLabs1/IOS-emulator/actions/workflows/ci.yml/badge.svg)](https://github.com/MarbleLabs1/IOS-emulator/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go&logoColor=white)](linux-emulator-server)
 [![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](src)
 [![QEMU](https://img.shields.io/badge/QEMU-aarch64-FF6600?logo=qemu&logoColor=white)](https://www.qemu.org)
@@ -15,6 +16,8 @@
 
 ---
 
+![Dashboard with two running VMs and a live log](docs/dashboard.png)
+
 ## ✨ Features
 
 - ▶️ **Start / stop VMs** from a dashboard or the HTTP API
@@ -22,7 +25,7 @@
 - 🖧 **VNC and SSH** access, bound to `127.0.0.1` by default
 - 🔐 **Token-protected API**, loopback-only unless you opt in
 - 🐳 **Docker, systemd and Kubernetes** files included
-- 🧪 **Tested Go backend** (race detector, path-escape and auth tests)
+- 🧪 **Tested end to end**: CI runs the Go and UI checks and boots a real ARM64 VM through the API
 
 ## 🧭 How it works
 
