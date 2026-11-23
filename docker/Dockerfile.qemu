@@ -22,7 +22,7 @@ RUN CGO_ENABLED=0 go build -ldflags "-s -w" -o /out/manager ./cmd/manager
 FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends qemu-system-arm qemu-utils qemu-efi-aarch64 ca-certificates curl \
+    && apt-get install -y --no-install-recommends qemu-system-arm qemu-utils qemu-efi-aarch64 ipxe-qemu ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --create-home --shell /usr/sbin/nologin emulator \

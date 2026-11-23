@@ -11,7 +11,7 @@ echo "Detected OS=$OS ARCH=$(uname -m)"
 case "$OS" in
   ubuntu|debian)
     $SUDO apt-get update -y
-    $SUDO apt-get install -y qemu-system-arm qemu-utils qemu-efi-aarch64 openssh-client
+    $SUDO apt-get install -y qemu-system-arm qemu-utils qemu-efi-aarch64 ipxe-qemu openssh-client
     ;;
   fedora)
     $SUDO dnf install -y qemu-system-aarch64 qemu-img edk2-aarch64

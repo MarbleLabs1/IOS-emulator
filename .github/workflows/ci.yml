@@ -54,7 +54,7 @@ jobs:
       - name: Install QEMU and UEFI firmware
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qemu-system-arm qemu-utils qemu-efi-aarch64
+          sudo apt-get install -y --no-install-recommends qemu-system-arm qemu-utils qemu-efi-aarch64 ipxe-qemu
           qemu-system-aarch64 --version | head -1
 
       - name: Build UI and manager

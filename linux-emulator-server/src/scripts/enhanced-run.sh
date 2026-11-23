@@ -30,7 +30,7 @@ USAGE
 }
 
 die() { echo "error: $*" >&2; exit 2; }
-require() { command -v "$1" >/dev/null 2>&1 || die "'$1' not found; install QEMU (see README)"; }
+require() { command -v "$1" >/dev/null 2>&1 || die "'$1' not found; install QEMU (see README); on Debian/Ubuntu also install ipxe-qemu"; }
 
 # Pick the first directory we can create, so the script also works unprivileged.
 writable_dir() {
