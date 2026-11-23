@@ -22,3 +22,16 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Build output
+/bin
+/build
+/release
+linux-emulator-server/cmd/manager/manager
+linux-emulator-server/bin
+coverage.out
+coverage.html
+
+# Runtime data
+workspace/
+.env

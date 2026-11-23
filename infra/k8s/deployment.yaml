@@ -1,3 +1,6 @@
+# The manager keeps VM state in memory and VMs run inside the pod, so it must run as a single replica.
+# Create the secret first:
+#   kubectl create secret generic qemu-manager --from-literal=token="$(openssl rand -hex 32)"
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -6,6 +9,8 @@ metadata:
     app: qemu-ios-emulator
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: qemu-ios-emulator
@@ -19,13 +24,28 @@ spec:
           image: qemu-ios-emulator/manager:latest
           ports:
             - containerPort: 8080
+          env:
+            - name: MANAGER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: qemu-manager
+                  key: token
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
           volumeMounts:
-            - name: images
-              mountPath: /workspaces/images
+            - name: data
+              mountPath: /var/lib/qemu-ios-emulator
             - name: logs
               mountPath: /var/log/qemu-ios-emulator
       volumes:
-        - name: images
+        - name: data
           emptyDir: {}
         - name: logs
           emptyDir: {}

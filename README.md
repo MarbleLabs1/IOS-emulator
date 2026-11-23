@@ -1,78 +1,85 @@
-# QEMU iOS Emulator - iOS on Linux & Windows Servers
+# QEMU Emulator Manager
 
-**Run iOS apps in QEMU. No physical device needed. Works on Linux, Windows, macOS servers.**
+A small web dashboard and HTTP API for running and monitoring **ARM64 (AArch64) virtual machines with QEMU**. Start and stop VMs, stream their console logs, and reach them over VNC or SSH.
 
-## The Problem
+> **What this is not:** it does not run iOS or iOS apps. iOS needs Apple's proprietary, signed boot chain and hardware, which QEMU cannot provide. This project boots ARM64 Linux (and any other UEFI-bootable ARM64 OS).
 
-- Need to test iOS apps but only have Linux/Windows servers
-- iOS Simulator only works on macOS with Xcode
-- Physical devices are expensive and limited
-- QEMU supports ARM64 but setup is extremely complex
+## Quick start
 
-## The Solution
-
-**QEMU iOS Emulator** - Automated iOS device management for QEMU
+Requirements: Go 1.21+, Node 18+, and QEMU with UEFI firmware (`make vm-setup` installs both on Debian/Ubuntu, Fedora and Arch).
 
 ```bash
-# Old way: memorize 50+ QEMU flags and manually setup firmware
-qemu-system-aarch64 -M virt -cpu cortex-a78 -smp 6 -m 6G \
-  -bios /path/to/firmware -kernel /path/to/kernel ...
-  # (40+ more complex parameters)
-
-# New way: one command
-make ios-setup && make ios-run
+cd linux-emulator-server && make vm-setup   # QEMU + firmware (needs sudo)
+cd .. && ./start.sh                         # builds the UI and manager, then runs it
 ```
 
-## Quick Features
+Open <http://127.0.0.1:8080>. The manager listens on loopback only unless you set `MANAGER_ADDR` and `MANAGER_TOKEN`.
 
-✅ **iPhone 14/15 Emulation** | ✅ **iPad Pro** | ✅ **Automated Setup** | ✅ **VNC + SSH** | ✅ **Docker Ready**
-
-## What This Provides
-
-1. **iOS Device Emulation** - iPhone 14/15 (A15/A16), iPad Pro (M2)
-2. **Automated Firmware** - Download EDK2, XNU kernel, device tree automatically
-3. **One-Click Setup** - `make ios-setup` downloads & configures everything
-4. **Multi-Device** - Run multiple iOS versions simultaneously
-5. **VNC + SSH** - Access iOS emulator over network (perfect for remote servers)
-6. **Web Dashboard** - Manage VMs from browser with Electron UI
-7. **Docker Support** - Deploy as container for CI/CD pipelines
-8. **Performance Monitoring** - Real-time CPU/RAM/disk graphs
-
-## Quick Start
+To install an OS, create a VM from the dashboard, or from a shell:
 
 ```bash
-# Backend setup (Linux server)
-cd linux-emulator-server
-make ios-setup       # Downloads firmware & creates disk images
-make ios-run         # Starts iPhone 14 emulator
-
-# Or use specific device
-make ios-run-iphone15
-make ios-run-ipad
-
-# Frontend (optional - web UI on Linux, Electron on any OS)
-npm install
-npm run dev          # React + Electron dashboard
+linux-emulator-server/src/scripts/enhanced-run.sh --name demo --iso ~/debian-arm64.iso --memory 4G --cpus 4
 ```
 
-## Use Cases
+Connect with a VNC client to `127.0.0.1:5900` (display `:0`) and SSH with `ssh -p 2222 user@127.0.0.1` once the guest runs an SSH server.
 
-- **CI/CD Testing** - Run iOS app tests on Linux build servers
-- **Remote Development** - Centralized iOS emulation infrastructure
-- **Development Teams** - Shared emulation farm via Docker
-- **Cloud Deployment** - Kubernetes-ready iOS emulation
-- **Testing at Scale** - Parallel multiple iOS versions
+> **Speed:** on an x86 host the guest is emulated in software (TCG) and is slow. KVM acceleration is used automatically on ARM64 Linux hosts with `/dev/kvm`.
 
-## Why QEMU iOS Emulator?
+## Run it as a service
 
-| Feature | This | Xcode Sim | Physical |
-|---------|------|-----------|----------|
-| Linux Support | ✅ | ❌ | ✅ |
-| Server Deploy | ✅ | ❌ | ❌ |
-| Headless/VNC | ✅ | ❌ | ❌ |
-| Cost | Free | Free* | $800+ |
-| CI/CD Ready | ✅ | Limited | ❌ |
+```bash
+sudo ./install.sh
+```
 
-*macOS only
+Installs to `/opt/qemu-ios-emulator`, creates a hardened systemd unit, and writes a random API token to `/etc/qemu-ios-emulator/manager.env`.
 
-Tech: QEMU + Go + React + Electron
+## Docker
+
+```bash
+echo "MANAGER_TOKEN=$(openssl rand -hex 32)" > .env
+docker compose -f docker-compose.qemu.yml up -d
+```
+
+Ports are published on `127.0.0.1` only. Use an SSH tunnel or a TLS reverse proxy for remote access.
+
+## Security
+
+- `/api/*` requires `MANAGER_TOKEN` (Bearer header, or `?token=` for the log WebSocket). The manager refuses to listen on a non-loopback address without it.
+- VNC and SSH forwards bind to `127.0.0.1` by default. VNC has no password, so never expose it directly.
+- The file editor and compiler (`IDE_ENABLED=true`) can read, write and compile files. It is off by default, requires a token, and is confined to `IDE_ROOT`.
+- Put TLS in front of the manager before using it across a network.
+
+## API
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/healthz` | Health check (no auth) |
+| POST | `/api/v1/vm/start` | Body: `name`, optional `profile` (`default`\|`max`), `memory`, `cpus`, `vnc`, `ssh_port`, `headless` |
+| POST | `/api/v1/vm/stop` | Body: `{"name": "..."}` |
+| GET | `/api/v1/vm/status?name=` | One running VM |
+| GET | `/api/v1/vm/list` | All running VMs |
+| WS | `/api/v1/ws/logs?name=` | Live console log |
+| GET/POST | `/api/v1/ide/{list,read,write,build}` | Only when `IDE_ENABLED=true` |
+
+## Configuration
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `MANAGER_ADDR` | `127.0.0.1:8080` | Listen address (or use `MANAGER_PORT`) |
+| `MANAGER_TOKEN` | none | API secret; required for non-loopback addresses |
+| `MANAGER_STATIC_DIR` | `dist` if present | Built web UI |
+| `EMULATOR_RUNNER` | `src/scripts/enhanced-run.sh` | Script that launches one VM |
+| `EMULATOR_LOG_DIR` | `/var/log/qemu-ios-emulator` | VM logs (falls back to the temp dir) |
+| `VM_DIR` | `/var/lib/qemu-ios-emulator/vms` | VM disks (falls back to `~/.local/share`) |
+| `FIRMWARE` | auto-detected | Path to `QEMU_EFI.fd` |
+| `IDE_ENABLED` / `IDE_ROOT` | off / `./workspace` | Remote editor |
+
+## Development
+
+```bash
+npm run dev          # UI on :5173, proxies /api to the manager on :8080
+npm run lint && npm run type-check
+cd linux-emulator-server && make test vet
+```
+
+Layout: `src/` React UI, `linux-emulator-server/cmd/manager` API entrypoint, `internal/manager` VM lifecycle and log streaming, `internal/ide` confined file editor, `src/scripts/enhanced-run.sh` QEMU launcher, `docker/` and `infra/k8s/` deployment files.

@@ -1,18 +1,25 @@
-version: '3.8'
+# Usage: echo "MANAGER_TOKEN=$(openssl rand -hex 32)" > .env && docker compose -f docker-compose.qemu.yml up -d
 services:
   manager:
     build:
       context: .
       dockerfile: docker/Dockerfile.qemu
     container_name: qemu-manager
+    environment:
+      MANAGER_TOKEN: ${MANAGER_TOKEN:?set MANAGER_TOKEN in .env}
     volumes:
-      - ./linux-emulator-server:/workspaces/linux-emulator-server:rw
-      - ./images:/workspaces/images:rw
-      - /var/log/qemu-ios-emulator:/var/log/qemu-ios-emulator:rw
+      - vm-data:/var/lib/qemu-ios-emulator
+      - vm-logs:/var/log/qemu-ios-emulator
     ports:
-      - "8080:8080"
-    cap_add:
-      - SYS_ADMIN
-    devices:
-      - /dev/kvm:/dev/kvm
+      # Everything is published on loopback only. VNC and SSH have no authentication of their own.
+      - "127.0.0.1:8080:8080"        # dashboard + API
+      - "127.0.0.1:5900-5910:5900-5910"  # VNC displays :0 to :10
+      - "127.0.0.1:2222-2232:2222-2232"  # per-VM SSH forwards
+    # On an ARM64 host you can pass the KVM device for near-native speed:
+    # devices:
+    #   - /dev/kvm:/dev/kvm
     restart: unless-stopped
+
+volumes:
+  vm-data:
+  vm-logs:
