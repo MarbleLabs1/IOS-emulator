@@ -93,6 +93,21 @@ jobs:
           echo "No UEFI output within 90s" >&2
           exit 1
 
+      - name: Logs stream over WebSocket
+        run: |
+          pip install --quiet websockets
+          python3 - <<'PY'
+          import asyncio, websockets
+          async def main():
+              async with websockets.connect("ws://127.0.0.1:8080/api/v1/ws/logs?name=ci") as ws:
+                  buf = ""
+                  async with asyncio.timeout(20):
+                      while "UEFI" not in buf and "acceleration" not in buf:
+                          buf += await ws.recv()
+                  print("received over WebSocket:", buf[:120].replace("\n", " | "))
+          asyncio.run(main())
+          PY
+
       - name: Stop the VM through the API
         run: |
           curl -fsS -X POST -d '{"name":"ci"}' http://127.0.0.1:8080/api/v1/vm/stop
@@ -104,3 +119,46 @@ jobs:
         run: |
           echo "--- VM log"; tail -n 60 "$RUNNER_TEMP/logs/ci.log" || true
           echo "--- manager log"; cat "$RUNNER_TEMP/manager.log" || true
+
+  linux-boot:
+    name: Boot Alpine Linux ARM64
+    runs-on: ubuntu-24.04
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: linux-emulator-server/go.sum
+
+      - name: Install QEMU and UEFI firmware
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-arm qemu-utils qemu-efi-aarch64 ipxe-qemu
+
+      - name: Download the Alpine virt ISO
+        run: |
+          base=https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/aarch64
+          iso=$(curl -fsS $base/latest-releases.yaml | grep -m1 -oE 'alpine-virt-[0-9.]+-aarch64\.iso')
+          echo "ISO: $iso"
+          curl -fSL -o "$RUNNER_TEMP/alpine.iso" "$base/$iso"
+          ls -lh "$RUNNER_TEMP/alpine.iso"
+
+      - name: Boot it with the runner script
+        run: |
+          mkdir -p "$RUNNER_TEMP/vms"
+          VM_DIR="$RUNNER_TEMP/vms" nohup linux-emulator-server/src/scripts/enhanced-run.sh \
+            --name alpine --iso "$RUNNER_TEMP/alpine.iso" --memory 1G --cpus 2 --headless \
+            > "$RUNNER_TEMP/alpine.log" 2>&1 &
+          for i in $(seq 1 300); do
+            if grep -qE 'Welcome to Alpine|localhost login:|Linux version' "$RUNNER_TEMP/alpine.log"; then
+              echo "Linux booted after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "Linux did not boot within 300s" >&2
+          exit 1
+
+      - name: Show console output
+        if: always()
+        run: tail -n 80 "$RUNNER_TEMP/alpine.log" || true
