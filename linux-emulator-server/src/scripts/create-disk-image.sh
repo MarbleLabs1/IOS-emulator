@@ -1,42 +1,15 @@
-#!/bin/bash
-# Script to create a disk image for the emulator
+#!/usr/bin/env bash
+# Create an empty qcow2 disk image.
+# Usage: create-disk-image.sh [PATH] [SIZE]
+set -euo pipefail
 
-set -e
+IMAGE="${1:-./images/disk.qcow2}"
+SIZE="${2:-32G}"
 
-echo "================================================"
-echo "Disk Image Creation Tool"
-echo "================================================"
+command -v qemu-img >/dev/null 2>&1 || { echo "qemu-img not found; install QEMU first" >&2; exit 2; }
+[ ! -e "$IMAGE" ] || { echo "refusing to overwrite existing file: $IMAGE" >&2; exit 1; }
 
-# Default values
-SIZE=${1:-64G}
-FORMAT=${2:-qcow2}
-OUTPUT_DIR="/var/lib/qemu-ios-emulator"
-IMAGE_NAME="macos-arm64.${FORMAT}"
-
-echo "Creating disk image with following parameters:"
-echo "  Size: $SIZE"
-echo "  Format: $FORMAT"
-echo "  Location: $OUTPUT_DIR/$IMAGE_NAME"
-
-# Create directory if it doesn't exist
-sudo mkdir -p "$OUTPUT_DIR"
-
-# Create the disk image
-echo ""
-echo "Creating disk image..."
-sudo qemu-img create -f "$FORMAT" "$OUTPUT_DIR/$IMAGE_NAME" "$SIZE"
-
-# Set appropriate permissions
-sudo chown $USER:$USER "$OUTPUT_DIR/$IMAGE_NAME"
-
-echo ""
-echo "================================================"
-echo "Disk image created successfully!"
-echo "================================================"
-echo ""
-echo "Image details:"
-qemu-img info "$OUTPUT_DIR/$IMAGE_NAME"
-
-echo ""
-echo "To use this image, update your config:"
-echo "  DISK_IMAGE=$OUTPUT_DIR/$IMAGE_NAME"
+mkdir -p "$(dirname "$IMAGE")"
+qemu-img create -f qcow2 "$IMAGE" "$SIZE"
+qemu-img info "$IMAGE"
+echo "Use it with: enhanced-run.sh --name NAME --disk $IMAGE"

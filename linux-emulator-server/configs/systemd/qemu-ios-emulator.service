@@ -1,17 +1,24 @@
 [Unit]
-Description=QEMU iOS Emulator Manager and Headless VM
+Description=QEMU Emulator Manager
 After=network.target
 
 [Service]
 Type=simple
-User=emulator_user
+User=emulator
+Group=emulator
+EnvironmentFile=/etc/qemu-ios-emulator/manager.env
 WorkingDirectory=/var/lib/qemu-ios-emulator
-# Start a default headless VM via enhanced-run.sh
-ExecStart=/bin/bash /workspaces/qemu-ios-emulator/linux-emulator-server/src/scripts/enhanced-run.sh --name default --headless
+ExecStart=/opt/qemu-ios-emulator/manager
 Restart=on-failure
 RestartSec=5
-StartLimitIntervalSec=60
-StartLimitBurst=5
+
+# Hardening. The manager starts QEMU as child processes; stopping the unit
+# stops every VM it launched (KillMode=control-group is the default).
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/qemu-ios-emulator /var/log/qemu-ios-emulator
 
 [Install]
 WantedBy=multi-user.target

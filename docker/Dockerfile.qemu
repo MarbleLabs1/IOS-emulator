@@ -1,18 +1,50 @@
+# syntax=docker/dockerfile:1
+# Build context: repository root.
+
+# ---- web UI ----
+FROM node:20-slim AS ui
+WORKDIR /ui
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY index.html vite.config.ts tsconfig.json tsconfig.app.json tsconfig.node.json ./
+COPY src ./src
+RUN npm run build
+
+# ---- manager ----
+FROM golang:1.22 AS api
+WORKDIR /src
+COPY linux-emulator-server/go.mod linux-emulator-server/go.sum ./
+RUN go mod download
+COPY linux-emulator-server/ ./
+RUN CGO_ENABLED=0 go build -ldflags "-s -w" -o /out/manager ./cmd/manager
+
+# ---- runtime ----
 FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential git python3 python3-pip qemu-system-aarch64 qemu-utils qemu-kvm libglib2.0-dev libfdt-dev libpixman-1-dev ca-certificates wget curl sudo \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends qemu-system-arm qemu-utils qemu-efi-aarch64 ipxe-qemu ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
-RUN useradd -ms /bin/bash emulator && mkdir -p /workspaces
-WORKDIR /workspaces
+RUN useradd --create-home --shell /usr/sbin/nologin emulator \
+    && mkdir -p /opt/qemu-ios-emulator/scripts /var/lib/qemu-ios-emulator/vms /var/lib/qemu-ios-emulator/workspace /var/log/qemu-ios-emulator \
+    && chown -R emulator:emulator /var/lib/qemu-ios-emulator /var/log/qemu-ios-emulator
 
-# copy manager and scripts
-COPY linux-emulator-server /workspaces/linux-emulator-server
-RUN chmod +x /workspaces/linux-emulator-server/src/scripts/*.sh
+COPY --from=api /out/manager /opt/qemu-ios-emulator/manager
+COPY --from=ui /ui/dist /opt/qemu-ios-emulator/dist
+COPY linux-emulator-server/src/scripts/enhanced-run.sh /opt/qemu-ios-emulator/scripts/enhanced-run.sh
+RUN chmod 755 /opt/qemu-ios-emulator/manager /opt/qemu-ios-emulator/scripts/enhanced-run.sh
 
+ENV MANAGER_ADDR=0.0.0.0:8080 \
+    EMULATOR_RUNNER=/opt/qemu-ios-emulator/scripts/enhanced-run.sh \
+    EMULATOR_LOG_DIR=/var/log/qemu-ios-emulator \
+    MANAGER_STATIC_DIR=/opt/qemu-ios-emulator/dist \
+    VM_DIR=/var/lib/qemu-ios-emulator/vms \
+    VNC_LISTEN=0.0.0.0 \
+    SSH_LISTEN=0.0.0.0
+
+USER emulator
+WORKDIR /var/lib/qemu-ios-emulator
 EXPOSE 8080
-
-ENV PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-
-CMD ["/workspaces/linux-emulator-server/cmd/manager/manager"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s CMD curl -fsS http://127.0.0.1:8080/healthz || exit 1
+# MANAGER_TOKEN is required because the manager listens on all interfaces.
+CMD ["/opt/qemu-ios-emulator/manager"]

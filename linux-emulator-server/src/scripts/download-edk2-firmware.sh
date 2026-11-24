@@ -1,55 +1,27 @@
-#!/bin/bash
-# Download EDK2 firmware for ARM64/AARCH64 UEFI boot
+#!/usr/bin/env bash
+# Install the AArch64 UEFI firmware (EDK2) that QEMU needs to boot ARM64 guests.
+set -euo pipefail
 
-set -e
+SUDO=""
+[ "$(id -u)" -eq 0 ] || SUDO="sudo"
 
-echo "================================================"
-echo "EDK2 ARM64 UEFI Firmware Download"
-echo "================================================"
+if [ -f /usr/share/qemu-efi-aarch64/QEMU_EFI.fd ]; then
+  echo "UEFI firmware already installed: /usr/share/qemu-efi-aarch64/QEMU_EFI.fd"
+  exit 0
+fi
 
-FIRMWARE_DIR="/usr/share/qemu/edk2-aarch64"
-TEMP_DIR="/tmp/edk2-firmware"
-
-echo "Downloading ARM64 UEFI firmware..."
-
-# Create directories
-sudo mkdir -p "$FIRMWARE_DIR"
-mkdir -p "$TEMP_DIR"
-
-# Download EDK2 AARCH64 firmware
-cd "$TEMP_DIR"
-
-# Option 1: From official QEMU firmware repository
-wget -q --show-progress \
-    https://releases.linaro.org/components/kernel/uefi-linaro/latest/release/qemu64/QEMU_EFI.fd \
-    -O QEMU_EFI.fd
-
-wget -q --show-progress \
-    https://releases.linaro.org/components/kernel/uefi-linaro/latest/release/qemu64/QEMU_VARS.fd \
-    -O QEMU_VARS.fd
-
-# Install firmware files
-sudo cp QEMU_EFI.fd "$FIRMWARE_DIR/"
-sudo cp QEMU_VARS.fd "$FIRMWARE_DIR/"
-
-# Create flash image combining both
-cat QEMU_EFI.fd QEMU_VARS.fd > flash.img
-sudo cp flash.img "$FIRMWARE_DIR/"
-
-echo ""
-echo "================================================"
-echo "EDK2 Firmware Downloaded Successfully!"
-echo "================================================"
-echo ""
-echo "Firmware location: $FIRMWARE_DIR"
-echo ""
-echo "Files:"
-ls -lh "$FIRMWARE_DIR"
-
-# Cleanup
-cd -
-rm -rf "$TEMP_DIR"
-
-echo ""
-echo "To use this firmware, add to QEMU command:"
-echo "  -bios $FIRMWARE_DIR/QEMU_EFI.fd"
+if command -v apt-get >/dev/null 2>&1; then
+  $SUDO apt-get update -y
+  $SUDO apt-get install -y qemu-efi-aarch64
+  echo "Installed: /usr/share/qemu-efi-aarch64/QEMU_EFI.fd"
+elif command -v dnf >/dev/null 2>&1; then
+  $SUDO dnf install -y edk2-aarch64
+  echo "Installed edk2-aarch64 (firmware under /usr/share/edk2/aarch64)"
+elif command -v pacman >/dev/null 2>&1; then
+  $SUDO pacman -S --noconfirm edk2-aarch64
+  echo "Installed edk2-aarch64"
+else
+  echo "Unsupported package manager. Install an AArch64 EDK2 build (QEMU_EFI.fd)" >&2
+  echo "and point the FIRMWARE environment variable at it." >&2
+  exit 1
+fi

@@ -1,105 +1,68 @@
 #!/usr/bin/env bash
+# Install the manager as a systemd service under /opt/qemu-ios-emulator.
+# Run from a checkout of this repository:  sudo ./install.sh
 set -euo pipefail
 
-# Master install script for Silicon iOS Emulator
-# Intended for: curl -sSL <repo>/install.sh | sudo bash
+[ "$(id -u)" -eq 0 ] || { echo "Run as root: sudo $0" >&2; exit 1; }
 
-REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
-LOG=/var/log/qemu-ios-emulator-install.log
-mkdir -p /var/log/qemu-ios-emulator
-exec > >(tee -a "$LOG") 2>&1
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PREFIX=/opt/qemu-ios-emulator
+CONF=/etc/qemu-ios-emulator
+DATA=/var/lib/qemu-ios-emulator
+LOGS=/var/log/qemu-ios-emulator
 
-echo "Starting installer: $(date -Is)"
+for cmd in go npm systemctl; do
+  command -v "$cmd" >/dev/null 2>&1 || { echo "error: '$cmd' is required" >&2; exit 2; }
+done
 
-require(){ command -v "$1" >/dev/null 2>&1 || { echo "required: $1"; exit 2; } }
+echo "==> Installing QEMU and UEFI firmware"
+bash "$ROOT/linux-emulator-server/src/scripts/advanced-setup.sh"
 
-echo "1) Running advanced setup (packages, edk2 scaffolding, disk image)"
-bash "$REPO_ROOT/linux-emulator-server/src/scripts/advanced-setup.sh"
+echo "==> Building web UI"
+(cd "$ROOT" && npm ci && npm run build)
 
-echo "2) Create emulator user and directories"
-id -u emulator_user >/dev/null 2>&1 || sudo useradd -m -s /bin/bash emulator_user || true
-sudo mkdir -p /var/lib/qemu-ios-emulator /var/log/qemu-ios-emulator /workspaces
-sudo chown -R emulator_user:emulator_user /var/lib/qemu-ios-emulator /var/log/qemu-ios-emulator /workspaces
+echo "==> Building manager"
+(cd "$ROOT/linux-emulator-server" && go build -o "$ROOT/bin/manager" ./cmd/manager)
 
-echo "3) Build Go manager"
-if ! command -v go >/dev/null 2>&1; then
-  echo "Go not found, installing..."
-  # Minimal install for Debian/Ubuntu
-  if [ -f /etc/debian_version ]; then
-    apt-get update
-    apt-get install -y golang-go
-  else
-    echo "Please install Go manually"; exit 1
-  fi
+echo "==> Creating user and directories"
+id -u emulator >/dev/null 2>&1 || useradd --system --home-dir "$DATA" --shell /usr/sbin/nologin emulator
+getent group kvm >/dev/null 2>&1 && usermod -aG kvm emulator || true
+install -d -o emulator -g emulator "$DATA" "$DATA/vms" "$DATA/workspace" "$LOGS"
+install -d "$PREFIX" "$PREFIX/scripts" "$CONF"
+
+echo "==> Installing files"
+install -m 755 "$ROOT/bin/manager" "$PREFIX/manager"
+install -m 755 "$ROOT/linux-emulator-server/src/scripts/enhanced-run.sh" "$PREFIX/scripts/enhanced-run.sh"
+rm -rf "$PREFIX/dist" && cp -r "$ROOT/dist" "$PREFIX/dist"
+install -m 644 "$ROOT/linux-emulator-server/configs/systemd/qemu-ios-emulator.service" /etc/systemd/system/qemu-ios-emulator.service
+
+if [ ! -f "$CONF/manager.env" ]; then
+  command -v openssl >/dev/null 2>&1 || { echo "error: openssl is required to generate the API token" >&2; exit 2; }
+  umask 077
+  cat > "$CONF/manager.env" <<ENV
+# Listen on loopback only. Put a TLS reverse proxy in front before exposing it.
+MANAGER_ADDR=127.0.0.1:8080
+MANAGER_TOKEN=$(openssl rand -hex 32)
+EMULATOR_RUNNER=$PREFIX/scripts/enhanced-run.sh
+EMULATOR_LOG_DIR=$LOGS
+MANAGER_STATIC_DIR=$PREFIX/dist
+VM_DIR=$DATA/vms
+# Uncomment to enable the remote file editor/compiler (it can read, write and compile files under IDE_ROOT):
+#IDE_ENABLED=true
+#IDE_ROOT=$DATA/workspace
+ENV
+  chown root:emulator "$CONF/manager.env"
+  chmod 640 "$CONF/manager.env"
+  echo "Generated API token in $CONF/manager.env"
+else
+  echo "Keeping existing $CONF/manager.env"
 fi
-cd "$REPO_ROOT/linux-emulator-server"
-go build -o ./cmd/manager/manager ./cmd/manager
 
-echo "4) Build web UI (React)"
-if ! command -v npm >/dev/null 2>&1; then
-  echo "npm not found, installing nodejs..."
-  if [ -f /etc/debian_version ]; then
-    curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
-    apt-get install -y nodejs
-  else
-    echo "Please install Node.js/npm manually"; exit 1
-  fi
-fi
-cd "$REPO_ROOT/linux-emulator-server/src/ui/web"
-npm ci --prefer-offline --no-audit
-npm run build
+systemctl daemon-reload
+systemctl enable --now qemu-ios-emulator.service
 
-echo "5) Install systemd service and enable"
-SERVICE_SRC="$REPO_ROOT/linux-emulator-server/configs/systemd/qemu-ios-emulator.service"
-SERVICE_DST="/etc/systemd/system/qemu-ios-emulator.service"
-sudo cp "$SERVICE_SRC" "$SERVICE_DST"
-sudo systemctl daemon-reload
-sudo systemctl enable --now qemu-ios-emulator.service || true
-
-echo "6) Start manager as system service"
-MANAGER_SERVICE="/etc/systemd/system/qemu-ios-emulator-manager.service"
-cat <<'EOF' | sudo tee "$MANAGER_SERVICE" >/dev/null
-[Unit]
-Description=QEMU iOS Emulator Manager
-After=network.target
-
-[Service]
-Type=simple
-User=emulator_user
-WorkingDirectory=/workspaces/qemu-ios-emulator/linux-emulator-server
-ExecStart=/workspaces/qemu-ios-emulator/linux-emulator-server/cmd/manager/manager
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now qemu-ios-emulator-manager.service || true
-
-echo "7) Serve web UI (static build) via systemd using npx serve"
-WEB_SERVICE="/etc/systemd/system/qemu-ios-emulator-web.service"
-cat <<'EOF' | sudo tee "$WEB_SERVICE" >/dev/null
-[Unit]
-Description=QEMU iOS Emulator Web UI
-After=network.target
-
-[Service]
-Type=simple
-User=emulator_user
-WorkingDirectory=/workspaces/qemu-ios-emulator/linux-emulator-server/src/ui/web
-ExecStart=/usr/bin/env npx serve -s build -l 8080
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now qemu-ios-emulator-web.service || true
-
-echo "Installation complete. UI: http://$(hostname -I | awk '{print $1}'):8080, Manager API: http://localhost:3001"
-echo "VNC: connect to <host>:5900 for headless VM display"
-echo "Logs: /var/log/qemu-ios-emulator"
+echo
+echo "Done. The dashboard listens on http://127.0.0.1:8080"
+echo "Log in with the token from:  sudo grep MANAGER_TOKEN $CONF/manager.env"
+echo "Remote access: use an SSH tunnel (ssh -L 8080:127.0.0.1:8080 user@host) or a TLS reverse proxy."
+echo "VM logs: $LOGS    Service logs: journalctl -u qemu-ios-emulator"
